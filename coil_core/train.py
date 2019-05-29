@@ -5,17 +5,29 @@ import time
 import traceback
 import torch
 import torch.optim as optim
+import numpy as np
 
+from coilutils.transformer import Colorize, Colorizes
 from configs import g_conf, set_type_of_process, merge_with_yaml
 from network import CoILModel, Loss, adjust_learning_rate_auto
 from input import CoILDataset, Augmenter, select_balancing_strategy
 from logger import coil_logger
 from coilutils.checkpoint_schedule import is_ready_to_save, get_latest_saved_checkpoint, \
                                     check_loss_validation_stopped
+from network.erfnet_fast import ERFNet_Fast
+from tools.vis import Dashboard
 
+
+def load_my_state_dict(model, state_dict):  # custom function to load model when not all dict keys are there
+    own_state = model.state_dict()
+    for name, param in state_dict.items():
+        if name not in own_state:
+            continue
+        own_state[name].copy_(param)
+    return model
 
 # The main function maybe we could call it with a default name
-def execute(gpu, exp_batch, exp_alias, suppress_output=True, number_of_workers=12):
+def execute(gpu, exp_batch, exp_alias, state_dict, suppress_output=True, number_of_workers=12):
     """
         The main training function. This functions loads the latest checkpoint
         for a given, exp_batch (folder) and exp_alias (experiment configuration).
@@ -100,6 +112,12 @@ def execute(gpu, exp_batch, exp_alias, suppress_output=True, number_of_workers=1
         data_loader = select_balancing_strategy(dataset, iteration, number_of_workers)
         model = CoILModel(g_conf.MODEL_TYPE, g_conf.MODEL_CONFIGURATION)
         model.cuda()
+
+        if state_dict != '':
+            seg_model = ERFNet_Fast(2)
+            seg_model = load_my_state_dict(seg_model, torch.load(state_dict))
+            seg_model.cuda()
+
         optimizer = optim.Adam(model.parameters(), lr=g_conf.LEARNING_RATE)
 
         if checkpoint_file is not None or g_conf.PRELOAD_MODEL_ALIAS is not None:
@@ -114,6 +132,8 @@ def execute(gpu, exp_batch, exp_alias, suppress_output=True, number_of_workers=1
         print ("Before the loss")
 
         criterion = Loss(g_conf.LOSS_FUNCTION)
+        color_transforms = Colorizes(2)
+        board = Dashboard(8097)
 
         # Loss time series window
         for data in data_loader:
@@ -139,8 +159,20 @@ def execute(gpu, exp_batch, exp_alias, suppress_output=True, number_of_workers=1
             controls = data['directions']
             # The output(branches) is a list of 5 branches results, each branch is with size [120,3]
             model.zero_grad()
-            branches = model(torch.squeeze(data['rgb'].cuda()),
-                             dataset.extract_inputs(data).cuda())
+            if state_dict != '':
+                with torch.no_grad():
+                    repre = seg_model(torch.squeeze(data['rgb'].cuda()), only_encode=False)
+                    inputs = repre
+                    imgs = color_transforms(inputs)
+                inputs = inputs.float().cuda()
+            else:
+                inputs = torch.squeeze(data['rgb'].cuda())
+
+            # vis
+            board.image(torch.squeeze(data['rgb'])[0].cpu().data, '(train) input iter: ' + str(iteration))
+            board.image(imgs[0].cpu().data, '(train) output iter: ' + str(iteration))
+
+            branches = model(inputs, dataset.extract_inputs(data).cuda())
             loss_function_params = {
                 'branches': branches,
                 'targets': dataset.extract_targets(data).cuda(),

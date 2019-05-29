@@ -9,13 +9,15 @@ import traceback
 import dlib
 
 # What do we define as a parameter what not.
-
+from coilutils.transformer import Colorizes
 from configs import g_conf, set_type_of_process, merge_with_yaml
 from network import CoILModel
 from input import CoILDataset, Augmenter
 from logger import coil_logger
 from coilutils.checkpoint_schedule import get_latest_evaluated_checkpoint, is_next_checkpoint_ready,\
     maximun_checkpoint_reach, get_next_checkpoint
+from network.erfnet_fast import ERFNet_Fast
+from tools.vis import Dashboard
 
 
 def write_waypoints_output(iteration, output):
@@ -40,10 +42,17 @@ def write_regular_output(iteration, output):
                                             output[i][2]])
 
 
+def load_my_state_dict(model, state_dict):  # custom function to load model when not all dict keys are there
+    own_state = model.state_dict()
+    for name, param in state_dict.items():
+        if name not in own_state:
+            continue
+        own_state[name].copy_(param)
+    return model
 
 
 # The main function maybe we could call it with a default name
-def execute(gpu, exp_batch, exp_alias, dataset_name, suppress_output):
+def execute(gpu, exp_batch, exp_alias, state_dict, dataset_name, suppress_output):
     latest = None
     try:
         # We set the visible cuda devices
@@ -96,10 +105,18 @@ def execute(gpu, exp_batch, exp_alias, dataset_name, suppress_output):
 
         model.cuda()
 
+        if state_dict != '':
+            seg_model = ERFNet_Fast(2)
+            seg_model = load_my_state_dict(seg_model, torch.load(state_dict))
+            seg_model.cuda()
+
         best_mse = 1000
         best_error = 1000
         best_mse_iter = 0
         best_error_iter = 0
+
+        color_transforms = Colorizes(2)
+        board = Dashboard(8097)
 
         while not maximun_checkpoint_reach(latest, g_conf.TEST_SCHEDULE):
 
@@ -122,7 +139,20 @@ def execute(gpu, exp_batch, exp_alias, dataset_name, suppress_output):
 
                     # Compute the forward pass on a batch from  the validation dataset
                     controls = data['directions']
-                    output = model.forward_branch(torch.squeeze(data['rgb']).cuda(),
+                    if state_dict != '':
+                        with torch.no_grad():
+                            repre = seg_model(torch.squeeze(data['rgb'].cuda()))
+                            inputs = repre
+                            imgs = color_transforms(inputs)
+                        inputs = inputs.float().cuda()
+                    else:
+                        inputs = torch.squeeze(data['rgb'].cuda())
+
+                    # vis
+                    board.image(torch.squeeze(data['rgb'])[0].cpu().data, '(train) input iter: ' + str(iteration_on_checkpoint))
+                    board.image(imgs[0].cpu().data, '(train) output iter: ' + str(iteration_on_checkpoint))
+                    
+                    output = model.forward_branch(inputs,
                                                   dataset.extract_inputs(data).cuda(),
                                                   controls)
                     # It could be either waypoints or direct control

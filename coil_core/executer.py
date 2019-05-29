@@ -11,7 +11,7 @@ from logger import printer, monitorer
 from . import train, validate, run_drive
 
 
-def execute_train(gpu, exp_batch, exp_alias, suppress_output=True, number_of_workers=12):
+def execute_train(gpu, exp_batch, exp_alias, state_dict, suppress_output=True, number_of_workers=12):
     """
 
     Args:
@@ -25,11 +25,11 @@ def execute_train(gpu, exp_batch, exp_alias, suppress_output=True, number_of_wor
     """
     create_exp_path(exp_batch, exp_alias)
     p = multiprocessing.Process(target=train.execute,
-                                args=(gpu, exp_batch, exp_alias, suppress_output, number_of_workers))
+                                args=(gpu, exp_batch, exp_alias, state_dict,  suppress_output, number_of_workers))
     p.start()
 
 
-def execute_validation(gpu, exp_batch, exp_alias, dataset, suppress_output=True):
+def execute_validation(gpu, exp_batch, exp_alias, state_dict, dataset, suppress_output=True):
     """
 
     Args:
@@ -44,7 +44,7 @@ def execute_validation(gpu, exp_batch, exp_alias, dataset, suppress_output=True)
     create_exp_path(exp_batch, exp_alias)
     # The difference between train and validation is the
     p = multiprocessing.Process(target=validate.execute,
-                                args=(gpu, exp_batch, exp_alias, dataset, suppress_output))
+                                args=(gpu, exp_batch, exp_alias, state_dict, dataset, suppress_output))
     p.start()
 
 
@@ -90,6 +90,7 @@ def folder_execute(params=None):
     """
 
     folder = params['folder']
+    state_dict = params['state_dict']
     allocated_gpus = params['gpus']
     validation_datasets = params['validation_datasets']
     driving_environments = params['driving_environments']
@@ -135,7 +136,7 @@ def folder_execute(params=None):
                     free_gpus,
                     allocation_parameters['train_cost'])
 
-                execute_train(gpu_number, process_specs['folder'], process_specs['experiment'],
+                execute_train(gpu_number, process_specs['folder'], process_specs['experiment'], state_dict,
                               params['number_of_workers'])
                 process_specs.update({'gpu': gpu_number})
 
@@ -158,7 +159,7 @@ def folder_execute(params=None):
                          train_status == 'Finished'):
                 free_gpus, resources_on_most_free_gpu, gpu_number = allocate_gpu_resources(
                                         free_gpus, allocation_parameters['validation_cost'])
-                execute_validation(gpu_number, process_specs['folder'], process_specs['experiment'],
+                execute_validation(gpu_number, process_specs['folder'], process_specs['experiment'], state_dict,
                                    process_specs['dataset'])
                 process_specs.update({'gpu': gpu_number})
                 executing_processes.append(process_specs)

@@ -88,6 +88,12 @@ if __name__ == '__main__':
         default=12
     )
     argparser.add_argument(
+        '-state_dict',
+        default='',
+        type=str,
+        help='pretrained model for the segmentation net'
+    )
+    argparser.add_argument(
         '-dk', '--docker',
         dest='docker',
         default='carlasim/carla:0.8.4',
@@ -174,6 +180,7 @@ if __name__ == '__main__':
 
         params = {
             'folder': args.folder,
+            'state_dict': args.state_dict,
             'gpus': list(args.gpus),
             'is_training': args.is_training,
             'validation_datasets': list(args.validation_datasets),
